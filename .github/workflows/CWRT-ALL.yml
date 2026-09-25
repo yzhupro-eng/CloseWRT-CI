@@ -50,10 +50,12 @@ jobs:
       fail-fast: false
       #max-parallel: 4
       matrix:
-        CONFIG: [MT7981, MT7986]
+        # 只编 GL-MT3600BE：MT7987 + 联发科闭源 WiFi7 驱动
+        # 上游原版这两行是 CONFIG: [MT7981, MT7986] + Yuzhii0718 的 24.10 源码，
+        # 且 chasey-dev 那行是注释掉的，所以直接 fork 是编不出 MT3600BE 的。
+        CONFIG: [MT7987]
         REPO_INFO:
-          - {SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly", BRANCH: "openwrt-24.10-6.6"}
-          #- {SOURCE: "chasey-dev/immortalwrt-mt798x-rebase", BRANCH: "25.12"}
+          - {SOURCE: "chasey-dev/immortalwrt-mt798x-rebase", BRANCH: "25.12-dev-wifi7"}
 
     #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml

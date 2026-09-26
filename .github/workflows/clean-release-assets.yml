@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MIT
+#
+# 为什么需要这个 workflow
+# ---------------------------------------------------------------------------
+# 上游 CWRT-ALL 的打包步骤会执行：
+#     find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
+# 把 bin/targets/ 下「所有」文件都搬进 release，其中包含
+#     mt7981-ram-ddr3/ddr4-bl2.bin
+#     mt7986-ram-ddr3/ddr4-bl2.bin
+#     mt7987-ram-comb-bl2.bin
+#     mt7988-ram-comb/ddr3/ddr4-bl2.bin
+# 这类引导（BL2）文件。它们跟本机固件无关，但一旦被刷进 BL2/FIP 分区
+# 就会改写 bootloader，属于高危误操作（2026-09-26 已经踩过一次）。
+#
+# 所以这里在 CWRT-ALL 跑完之后自动清理：只保留
+#     1) *sysupgrade*   —— 要刷的固件
+#     2) *initramfs*    —— 恢复用镜像
+#     3) *.manifest     —— 包清单（核对用）
+#     4) Config-*.txt   —— 本次构建配置
+# 其余资产（BL2/FIP/preloader 等）一律删除。
+#
+# 注意：用 workflow_run 而不是 release 事件，是因为 release 是用默认的
+# GITHUB_TOKEN 创建的，这类事件不会再触发其他 workflow。
+name: Trim Release Assets
+
+on:
+  workflow_run:
+    workflows: ["CWRT-ALL"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  trim:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete bootloader and other non-firmware assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$REPO" --limit 20 --json tagName --jq '.[].tagName' > /tmp/tags.txt || true
+          if [ ! -s /tmp/tags.txt ]; then
+            echo "没有 release，跳过"
+            exit 0
+          fi
+          while IFS= read -r TAG; do
+            [ -z "$TAG" ] && continue
+            echo "=== $TAG ==="
+            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > /tmp/assets.txt || continue
+            while IFS= read -r NAME; do
+              [ -z "$NAME" ] && continue
+              case "$NAME" in
+                *sysupgrade*)            echo "  保留固件 : $NAME" ;;
+                *initramfs*)             echo "  保留恢复 : $NAME" ;;
+                *.manifest|Config-*.txt) echo "  保留清单 : $NAME" ;;
+                *)                       echo "  删除危险 : $NAME"; gh release delete-asset "$TAG" "$NAME" --yes ;;
+              esac
+            done < /tmp/assets.txt
+          done < /tmp/tags.txt
+          echo "清理完成"

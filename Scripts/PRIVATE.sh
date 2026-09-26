@@ -36,3 +36,38 @@ if [ -f "$WIFI_UC" ]; then
 fi
 
 true
+
+# --- 3) ksmbd 6.12 死锁 / RCU stall 修复（2026-09-26 新增） ---
+# 上游 OpenWrt issue #24738，修复 commit a42896bebfcc287ed1e61d820a888e33b1eb80ce
+# 'ksmbd: harden file lifetime during session teardown'
+# 症状：Windows 打开共享文件 -> ksmbd 在 smb2_open / ksmbd_smb_check_shared_mode
+#       里 list 损坏并死循环 -> rcu self-detected stall 每 180 秒复发 ->
+#       load 冲到 6.98（4 核占满）-> WiFi 关联/四次握手全超时（设备提示密码错误），
+#       且该自旋在内核态杀不掉，只能重启路由器；原厂用 Samba4 用户态服务所以没这毛病。
+# 做法：编译前把上游 6.12 专用 backport 放进 backport-6.12/，由内核构建自动应用。
+#       下载失败即中止构建，避免编出仍然会死锁的固件。
+KSMBD_DIR='./target/linux/generic/backport-6.12'
+KSMBD_PATCH='901-ksmbd-harden-file-lifetime-during-session-teardown.patch'
+KSMBD_URL='https://raw.githubusercontent.com/openwrt/openwrt/d9f4284a719da3c391876774219b5be0b5fea2a0/target/linux/generic/backport-6.12/501-v7.1-ksmbd-harden-file-lifetime-during-session-teardown.patch'
+
+if [ -d $KSMBD_DIR ]; then
+	got=0
+	for attempt in 1 2 3; do
+		if curl -fsSL --retry 3 --connect-timeout 20 $KSMBD_URL -o $KSMBD_DIR/$KSMBD_PATCH; then
+			got=1
+			break
+		fi
+		sleep 5
+	done
+	if [ $got != 1 ] || ! head -n 1 $KSMBD_DIR/$KSMBD_PATCH | grep -q '^From '; then
+		echo '[PRIVATE] FATAL: ksmbd 6.12 patch download failed, aborting build.' >&2
+		exit 1
+	fi
+	echo [PRIVATE] ksmbd 6.12 patch installed: $KSMBD_DIR/$KSMBD_PATCH
+	grep -m1 '^Subject:' $KSMBD_DIR/$KSMBD_PATCH || true
+	wc -l $KSMBD_DIR/$KSMBD_PATCH || true
+else
+	echo '[PRIVATE] WARN: backport-6.12 not found, ksmbd patch not injected.' >&2
+fi
+
+true

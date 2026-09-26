@@ -38,7 +38,9 @@ jobs:
         with:
           gh_token: ${{secrets.GITHUB_TOKEN}}
           delete_releases: true
-          releases_keep_latest: 0
+          # 保留最近 1 个 release：万一新固件有问题，还能回退到上一版
+          # （原上游是 0，即每次编译前把旧 release 全删掉）
+          releases_keep_latest: 1
           delete_tags: true
           delete_workflows: true
           workflows_keep_day: 0
@@ -52,12 +54,14 @@ jobs:
       matrix:
         # 只编 GL-MT3600BE：MT7987 + 联发科闭源 WiFi7 驱动
         # 上游原版这两行是 CONFIG: [MT7981, MT7986] + Yuzhii0718 的 24.10 源码，
-        # 且 chasey-dev 那行是注释掉的，所以直接 fork 是编不出 MT3600BE 的。
+        # 且 chasey-dev 那行是注释掉的，所以直接 fork 编不出 MT3600BE。
         CONFIG: [MT7987]
         REPO_INFO:
           - {SOURCE: "chasey-dev/immortalwrt-mt798x-rebase", BRANCH: "25.12-dev-wifi7"}
 
     #调用公用编译核心WRT-CORE.yml
+    #注意：跑完之后 .github/workflows/clean-release-assets.yml 会自动删掉
+    #      release 里的 BL2/FIP 等引导文件，只留固件/manifest/配置
     uses: ./.github/workflows/WRT-CORE.yml
     with:
       #编译配置
